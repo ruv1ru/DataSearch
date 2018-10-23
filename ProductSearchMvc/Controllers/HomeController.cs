@@ -38,9 +38,24 @@ namespace ProductSearchMvc.Controllers
 
         public IActionResult GetProducts()
         {
-            int totalRows;
-            var products = new ProductService().GetProducts(new SearchCriteria(), out totalRows);
+
+            IProductService productService = GetProductServiceViaDependencyInjection();
+
+            var searchCriteria = new SearchCriteria();
+            searchCriteria.PageIndex = 1;
+            searchCriteria.PageSize = 10;
+            searchCriteria.SearchQuery = "";
+            searchCriteria.SortField = "CreatedDate";
+            searchCriteria.SortOrder = "DESC";
+
+            var products = productService.GetProducts(searchCriteria);
+
             return new JsonResult(products);
+        }
+
+        private IProductService GetProductServiceViaDependencyInjection()
+        {
+            return new ProductService();
         }
 
         public IActionResult Error()
@@ -51,81 +66,103 @@ namespace ProductSearchMvc.Controllers
 
     public interface IProductService
     {
-        IEnumerable<ProductModel> GetProducts(SearchCriteria searchCriteria, out int totalRows);
+        IEnumerable<ProductModel> GetProducts(SearchCriteria searchCriteria);
     }
 
     public class ProductService : IProductService
     {
-        public IEnumerable<ProductModel> GetProducts(SearchCriteria searchCriteria, out int totalRows)
+        public IEnumerable<ProductModel> GetProducts(SearchCriteria searchCriteria)
         {
-            totalRows = 1;
-            searchCriteria.PageIndex = 1;
-            searchCriteria.PageSize = 5;
-            searchCriteria.SearchQuery = "Ch";
 
             var param1 = new SqlParameter
             {
                 ParameterName = "RecordsPerPage",
-                Value = 5,
+                Value = searchCriteria.PageSize,
                 DbType = DbType.Int32
             };
             var param2 = new SqlParameter
             {
                 ParameterName = "PageNo",
-                Value = 1,
+                Value = searchCriteria.PageIndex,
                 DbType = DbType.Int32
             };
             var param3 = new SqlParameter
             {
                 ParameterName = "KeyWord",
-                Value = "Ch",
+                Value = searchCriteria.SearchQuery,
                 DbType = DbType.String
             };
             var param4 = new SqlParameter
             {
                 ParameterName = "SortBy",
-                Value = "",
+                Value = searchCriteria.SortField + " " + searchCriteria.SortOrder,
                 DbType = DbType.String
             };
 
-            var products = GetDataResults("SearchProducts @RecordsPerPage, @PageNo, @KeyWord, @SortBy", Startup.ProductsConnectionString, param1, param2, param3, param4);
+            var productsDataTable = GetDataResults("SearchProducts", Startup.ProductsConnectionString, param1, param2, param3, param4);
+            //var products = GetDataResults("SearchProducts @RecordsPerPage, @PageNo, @KeyWord, @SortBy", Startup.ProductsConnectionString, param1, param2, param3, param4);
 
-            return new List<ProductModel>();
+
+
+
+
+            return GetProductModels(productsDataTable);
         }
 
-        private DataTable GetDataResults(string sqlQuery, string connectionString, params object[] parameters)
+
+        IEnumerable<ProductModel> GetProductModels(DataTable productsDataTable)
         {
+            foreach (DataRow row in productsDataTable.Rows)
+            {
+                yield return PopulateProduct(row);
+            }
+
+        }
+
+        DataTable GetDataResults(string sqlQuery, string connectionString, params object[] parameters)
+        {
+
+
 
             var results = new DataTable();
 
-            using (var conn = new SqlConnection(connectionString)){
-                using (var command = new SqlCommand(sqlQuery, conn)){
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.AddRange(parameters);
-                    using (var dataAdapter = new SqlDataAdapter(command)){
-                        dataAdapter.Fill(results);
+            try
+            {
+                using (var conn = new SqlConnection(connectionString))
+                {
+
+
+                    using (var command = new SqlCommand(sqlQuery, conn))
+                    {
+
+
+                        command.CommandType = CommandType.StoredProcedure;
+                        command.Parameters.AddRange(parameters);
+
+
+                        using (var dataAdapter = new SqlDataAdapter(command))
+                        {
+
+
+                            dataAdapter.Fill(results);
+
+
+                        }
                     }
+
                 }
 
+            //var resultRows = results.AsEnumerable().ToList();
+            }
+            catch (Exception ex){
+
+                var error = ex.Message;
+                var innerError = ex.InnerException;
+
+                results = new DataTable();
             }
 
 
-            //using (var command = new SqlCommand(sqlQuery, conn))
-            //using (var dataAdapter = new SqlDataAdapter(command))
-                //dataAdapter.Fill(results);
-
-
-            /*
-             using (SqlCommand cmd = new SqlCommand("sp_Add_contact", con)) {
-      cmd.CommandType = CommandType.StoredProcedure;
-
-      cmd.Parameters.Add("@FirstName", SqlDbType.VarChar).Value = txtFirstName.Text;
-      cmd.Parameters.Add("@LastName", SqlDbType.VarChar).Value = txtLastName.Text;
-
-      con.Open();
-      cmd.ExecuteNonQuery();
-    }
-*/
             return results;
 
         }
@@ -137,9 +174,12 @@ namespace ProductSearchMvc.Controllers
 
             var product = new ProductModel
             {
+                Id = int.Parse(row["Id"].ToString()),
+                TotalRows = int.Parse(row["RECORDCOUNT"].ToString()),
+                RowNumber = int.Parse(row["ROW"].ToString()),
                 ProductCode = row["ProductCode"].ToString(),
                 Description = row["Description"].ToString(),
-                CreatedDate = DateTime.Parse(row["CreatedDate"].ToString())
+                CreatedDate = DateTime.Parse(row["CreatedDate"].ToString()),
             };
 
 
@@ -149,6 +189,8 @@ namespace ProductSearchMvc.Controllers
 
     public class ProductModel
     {
+        public int TotalRows { get; set; }
+        public int RowNumber { get; set; }
         public int Id { get; set; }
         public string ProductCode { get; set; }
         public string Description { get; set; }
